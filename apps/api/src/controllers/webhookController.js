@@ -19,10 +19,8 @@ async function handleWhatsAppWebhook(req, res) {
   res.status(200).json({ status: 'ok' });
 
   const rawBody = req.rawBody;
-  const signature = req.headers['x-hub-signature-256'] || req.headers['x-msg91-signature'] || '';
-
-  // Validate signature
-  if (!validateWebhookSignature(rawBody, signature)) {
+  // Validate shared secret header (or HMAC signature fallback)
+  if (!validateWebhookSignature(rawBody, req.headers)) {
     logger.warn('Webhook signature validation failed');
     await AuditLog.create({
       eventType: 'webhook_invalid',
@@ -36,7 +34,7 @@ async function handleWhatsAppWebhook(req, res) {
 
   await AuditLog.create({
     eventType: 'webhook_received',
-    meta: { type: body?.data?.type || 'unknown' },
+    meta: { type: body?.contentType || body?.data?.type || 'unknown' },
   }).catch(() => {});
 
   // Parse event
