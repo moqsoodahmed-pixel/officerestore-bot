@@ -1,0 +1,17 @@
+{
+  "name": "officerestore-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "Officerestore WhatsApp Bot - MSG91 + Node.js + MongoDB",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "start:api": "npm run start --workspace=apps/api",
+    "test": "npm run test --workspace=apps/api",
+    "install:all": "npm install"
+  }
+}
