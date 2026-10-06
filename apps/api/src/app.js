@@ -11,6 +11,10 @@ const logger = require('./utils/logger');
 
 const app = express();
 
+// Railway (and most hosts) sit behind a proxy that sets X-Forwarded-For.
+// Trust the first proxy so rate limiting sees the real client IP.
+app.set('trust proxy', 1);
+
 // ─── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet());
 
