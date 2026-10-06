@@ -22,6 +22,7 @@ const auditLogSchema = new mongoose.Schema({
       'conversation_started', 'conversation_state_change',
       'human_takeover', 'bot_resumed',
       'opt_out', 'opt_in',
+      'sales_alert',
       'order_lookup', 'order_lookup_failed',
       'auth_success', 'auth_failure',
       'error', 'rate_limited',

@@ -87,6 +87,22 @@ const config = {
     hours: optional('SUPPORT_HOURS', 'Mon-Sat 9AM-6PM IST'),
   },
 
+  // Store details for "Visit Our Store" — set in Railway, never hard-coded
+  store: {
+    address: optional('STORE_ADDRESS'),
+    hours: optional('STORE_HOURS'),
+    mapUrl: optional('STORE_MAP_URL'),
+    salesPhone: optional('SALES_PHONE', process.env.SUPPORT_PHONE || ''),
+  },
+
+  // WhatsApp numbers that receive "NEW WHATSAPP LEAD" alerts (comma separated)
+  sales: {
+    alertNumbers: optional('SALES_ALERT_NUMBERS')
+      .split(',')
+      .map((n) => n.replace(/\D/g, ''))
+      .filter(Boolean),
+  },
+
   isMock() {
     return this.env !== 'production';
   },

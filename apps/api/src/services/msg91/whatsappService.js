@@ -139,7 +139,7 @@ async function sendAddAnotherOrDone(to, selectedLabel, allSelected) {
 }
 
 /**
- * Send the main menu as an interactive list.
+ * Send the main menu as an interactive list (spec section 2).
  */
 async function sendMainMenu(to, greeting = '') {
   const body =
@@ -153,22 +153,14 @@ async function sendMainMenu(to, greeting = '') {
     buttonLabel: 'Choose Option',
     sections: [
       {
-        title: 'Shop & Enquire',
+        title: 'How can we help?',
         rows: [
-          { id: 'menu_browse', title: 'Browse Products', description: 'Explore office furniture & accessories' },
-          { id: 'menu_bulk', title: 'Bulk Office Requirement', description: 'Complete office setup, multi-seat' },
-          { id: 'menu_quote', title: 'Get a Quote', description: 'Request pricing for specific items' },
-          { id: 'menu_pricing', title: 'Availability & Pricing', description: 'Check stock & current prices' },
-        ],
-      },
-      {
-        title: 'Orders & Support',
-        rows: [
-          { id: 'menu_delivery', title: 'Delivery & Installation', description: 'Coverage, charges & timelines' },
-          { id: 'menu_track', title: 'Track My Order', description: 'Order status & tracking' },
-          { id: 'menu_invoice', title: 'Invoice / GST Details', description: 'Request invoice or billing help' },
-          { id: 'menu_complaint', title: 'Returns / Warranty', description: 'Complaints & support tickets' },
-          { id: 'menu_support', title: 'Talk to Sales / Support', description: 'Speak with our team' },
+          { id: 'menu_buy', title: 'Buy Office Furniture', description: 'Chairs, workstations, tables & more' },
+          { id: 'menu_setup', title: 'Setup My Office', description: 'Complete furniture for your team' },
+          { id: 'menu_bulk', title: 'Bulk / Corporate', description: 'Large or corporate requirements' },
+          { id: 'menu_find', title: 'Find a Product', description: 'Tell us what you need' },
+          { id: 'menu_visit', title: 'Visit Our Store', description: 'Address, timings & directions' },
+          { id: 'menu_sales', title: 'Talk to Sales', description: 'Chat with our sales team' },
         ],
       },
     ],

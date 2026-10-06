@@ -6,13 +6,14 @@ const Contact = require('../models/Contact');
 const AuditLog = require('../models/AuditLog');
 const logger = require('../utils/logger');
 const config = require('../config');
+const { buildGreeting } = require('./flows/common');
 
 const COMMANDS = {
   MENU: /^menu$/i,
   BACK: /^back$/i,
   SUPPORT: /^support$/i,
-  HUMAN: /^human$/i,
-  STOP: /^stop$/i,
+  HUMAN: /^(human|sales|agent)$/i,
+  STOP: /^(stop|unsubscribe)$/i,
   HI: /^(hi|hello|hey|halo|namaste|start)$/i,
 };
 
@@ -40,8 +41,8 @@ async function handleCommand(command, event, conversation, contact) {
     case 'MENU':
     case 'HI': {
       await stateManager.resetToMenu(conversation);
-      const greeting = `Hello${contact.firstName ? ` ${contact.firstName}` : ''}! 👋 Welcome to *Officerestore*.\n\nWe help you find office furniture and workplace essentials for your business or workspace.`;
-      await sendMainMenu(from, greeting);
+      await sendMainMenu(from, buildGreeting(contact));
+      await stateManager.transition(conversation, 'welcome', 'awaiting_menu_selection');
       return true;
     }
 
@@ -81,15 +82,9 @@ async function handleCommand(command, event, conversation, contact) {
     }
 
     case 'HUMAN': {
-      await sendButtons(from, {
-        body: '👤 Connecting you to our team.\n\nPlease select the team you need:',
-        buttons: [
-          { id: 'human_sales', title: 'Sales / Products' },
-          { id: 'human_support', title: 'Order Support' },
-          { id: 'human_other', title: 'Other' },
-        ],
-      });
-      await stateManager.transition(conversation, 'human_handoff', 'choose_team');
+      // Spec: a clear Talk to Sales option from every flow — never blocked
+      const talkToSales = require('./flows/talkToSalesFlow');
+      await talkToSales.start(event, conversation, contact);
       return true;
     }
 

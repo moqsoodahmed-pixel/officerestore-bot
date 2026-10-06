@@ -10,6 +10,12 @@ const orderFlow = require('./flows/orderFlow');
 const invoiceFlow = require('./flows/invoiceFlow');
 const complaintFlow = require('./flows/complaintFlow');
 const supportFlow = require('./flows/supportFlow');
+const buyFurnitureFlow = require('./flows/buyFurnitureFlow');
+const setupOfficeFlow = require('./flows/setupOfficeFlow');
+const bulkCorporateFlow = require('./flows/bulkCorporateFlow');
+const findProductFlow = require('./flows/findProductFlow');
+const storeVisitFlow = require('./flows/storeVisitFlow');
+const talkToSalesFlow = require('./flows/talkToSalesFlow');
 const logger = require('../utils/logger');
 
 const FLOW_MAP = {
@@ -25,6 +31,14 @@ const FLOW_MAP = {
   complaint: complaintFlow,
   support: supportFlow,
   human_handoff: supportFlow,
+
+  // Spec flows (main menu)
+  buy_furniture: buyFurnitureFlow,
+  setup_office: setupOfficeFlow,
+  bulk_corporate: bulkCorporateFlow,
+  find_product: findProductFlow,
+  store_visit: storeVisitFlow,
+  talk_to_sales: talkToSalesFlow,
 };
 
 /**

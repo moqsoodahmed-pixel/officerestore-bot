@@ -73,6 +73,9 @@ const conversationSchema = new mongoose.Schema({
       'welcome', 'browse_products', 'bulk_enquiry', 'quote',
       'pricing', 'delivery', 'order_tracking', 'invoice',
       'complaint', 'support', 'human_handoff', 'idle',
+      // Spec flows
+      'buy_furniture', 'setup_office', 'bulk_corporate',
+      'find_product', 'store_visit', 'talk_to_sales',
     ],
     default: 'idle',
   },

@@ -19,7 +19,7 @@ const leadSchema = new mongoose.Schema({
 
   leadType: {
     type: String,
-    enum: ['product_enquiry', 'bulk_office', 'quote_request', 'support', 'general'],
+    enum: ['product_enquiry', 'bulk_office', 'quote_request', 'support', 'general', 'office_setup', 'sales_handover'],
     required: true,
     index: true,
   },
@@ -39,6 +39,20 @@ const leadSchema = new mongoose.Schema({
   specialRequirements: { type: String },
   installationRequired: { type: Boolean },
   businessType: { type: String },
+
+  // Spec fields
+  contactPhone: { type: String },
+  requirement: { type: String },
+  category: { type: String },
+  quantity: { type: Number },
+  location: { type: String },
+  teamSize: { type: String },
+  quoteRequested: { type: Boolean, default: false },
+  leadScore: { type: String, enum: ['HOT', 'WARM', 'COLD'], default: 'COLD', index: true },
+  priority: { type: String, enum: ['HIGH', 'NORMAL'], default: 'NORMAL' },
+  followUpAt: { type: Date },
+  salesNotifiedAt: { type: Date },
+  handoverRequested: { type: Boolean, default: false },
 
   // Attribution
   source: { type: String, index: true },
