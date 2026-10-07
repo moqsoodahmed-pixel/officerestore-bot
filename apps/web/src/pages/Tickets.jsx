@@ -86,7 +86,7 @@ export default function Tickets() {
 
       {selected && (
         <div style={{
-          position: 'fixed', right: 0, top: 0, bottom: 0, width: 420,
+          position: 'fixed', right: 0, top: 0, bottom: 0, width: 'min(420px, 100vw)', boxSizing: 'border-box',
           background: '#fff', boxShadow: '-4px 0 20px rgba(0,0,0,0.12)',
           padding: 28, overflowY: 'auto', zIndex: 100,
         }}>

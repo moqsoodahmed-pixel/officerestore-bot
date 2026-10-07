@@ -296,7 +296,7 @@ export default function Conversations() {
             <>
               {/* Header */}
               <header style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px',
+                display: 'flex', alignItems: 'center', gap: isNarrow ? 8 : 12, padding: isNarrow ? '10px 12px' : '12px 18px',
                 background: '#fff', borderBottom: `1px solid ${C.line}`,
               }}>
                 {isNarrow && (
@@ -304,18 +304,18 @@ export default function Conversations() {
                 )}
                 <Avatar name={name} number={conversation?.whatsappNumber || selectedFromList?.whatsappNumber} human={isHuman} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
+                  <div style={{ fontWeight: 700, color: C.navy, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {name || `+${conversation?.whatsappNumber || selectedFromList?.whatsappNumber || ''}`}
                   </div>
-                  <div style={{ fontSize: 12, color: C.muted }}>
+                  <div style={{ fontSize: 12, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     +{conversation?.whatsappNumber || selectedFromList?.whatsappNumber}
                     {conversation && ` · ${isHuman ? 'With sales team' : `Bot: ${FLOW_LABELS[conversation.currentFlow] || conversation.currentFlow}`}`}
                   </div>
                 </div>
                 {conversation && (isHuman ? (
-                  <button className="act" onClick={handBack} disabled={busy}>Hand back to bot</button>
+                  <button className="act" onClick={handBack} disabled={busy}>{isNarrow ? 'To bot' : 'Hand back to bot'}</button>
                 ) : (
-                  <button className="act primary" onClick={takeOver} disabled={busy}>Take over chat</button>
+                  <button className="act primary" onClick={takeOver} disabled={busy}>{isNarrow ? 'Take over' : 'Take over chat'}</button>
                 ))}
                 {!isNarrow && (
                   <button className="act" onClick={() => setShowDetails((v) => !v)} aria-pressed={showDetails}>
@@ -329,7 +329,7 @@ export default function Conversations() {
               )}
 
               {/* Messages */}
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', background: C.chatBg, padding: '16px 6%' }}>
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', background: C.chatBg, padding: isNarrow ? '12px 10px' : '16px 6%' }}>
                 {threadLoading && <div style={{ textAlign: 'center', color: C.muted, fontSize: 14 }}>Loading messages…</div>}
                 {thread && thread.messages.length === 0 && (
                   <div style={{ textAlign: 'center', color: C.muted, fontSize: 14 }}>No messages saved for this chat yet.</div>
@@ -346,14 +346,14 @@ export default function Conversations() {
                           </span>
                         </div>
                       )}
-                      <Bubble m={m} />
+                      <Bubble m={m} narrow={isNarrow} />
                     </div>
                   );
                 })}
               </div>
 
               {/* Composer */}
-              <footer style={{ background: '#fff', borderTop: `1px solid ${C.line}`, padding: '12px 18px' }}>
+              <footer style={{ background: '#fff', borderTop: `1px solid ${C.line}`, padding: isNarrow ? '8px 10px' : '12px 18px' }}>
                 {!conversation ? null : !isHuman ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13, color: C.muted }}>
                     <span style={{ flex: 1 }}>The bot is replying to this customer. Take over the chat to reply yourself.</span>
@@ -371,9 +371,9 @@ export default function Conversations() {
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                          if (!isNarrow && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
                         }}
-                        placeholder="Type a reply… (Enter to send, Shift+Enter for a new line)"
+                        placeholder={isNarrow ? 'Type a reply…' : 'Type a reply… (Enter to send, Shift+Enter for a new line)'}
                         aria-label="Reply message"
                         rows={2}
                         style={{
@@ -447,7 +447,7 @@ function Avatar({ name, number, human }) {
   );
 }
 
-function Bubble({ m }) {
+function Bubble({ m, narrow }) {
   const out = m.direction === 'outbound';
   const who = !out ? null : m.sentBy === 'agent' ? 'You' : m.sentBy === 'alert' ? 'Sales alert' : 'Bot';
   const bg = !out ? '#fff' : m.sentBy === 'agent' ? C.agent : m.sentBy === 'alert' ? C.alert : C.greenSoft;
@@ -455,7 +455,7 @@ function Bubble({ m }) {
   return (
     <div style={{ display: 'flex', justifyContent: out ? 'flex-end' : 'flex-start', marginBottom: 6 }}>
       <div style={{
-        maxWidth: '72%', background: bg, borderRadius: 10, padding: '7px 10px 5px',
+        maxWidth: narrow ? '86%' : '72%', background: bg, borderRadius: 10, padding: '7px 10px 5px',
         boxShadow: '0 1px 0.5px rgba(0,0,0,.08)', fontSize: 14, color: '#1f1f2a', lineHeight: 1.45,
       }}>
         {who && <div style={{ fontSize: 11, fontWeight: 700, color: m.sentBy === 'agent' ? '#2c4fb5' : C.green, marginBottom: 2 }}>{who}</div>}
