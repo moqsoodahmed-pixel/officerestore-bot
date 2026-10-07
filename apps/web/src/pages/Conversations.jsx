@@ -1,202 +1,502 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
-import { Card, Table, StatusBadge, Button, Pagination, Loading, ErrorMsg } from '../components/UI';
+
+/**
+ * Conversations — WhatsApp-style inbox.
+ * Left: chat list. Middle: full message thread. Right: customer & lead details.
+ * Refreshes automatically every few seconds.
+ */
+
+const C = {
+  navy: '#1a1a2e',
+  green: '#128c4a',
+  greenSoft: '#dcf5e3',
+  agent: '#e3ecff',
+  alert: '#fff4d6',
+  line: '#e6e7ef',
+  muted: '#6b6b80',
+  bg: '#f5f6fa',
+  chatBg: '#efeae2',
+  red: '#c62828',
+};
+
+const LIST_REFRESH_MS = 10000;
+const THREAD_REFRESH_MS = 5000;
+
+const FLOW_LABELS = {
+  welcome: 'Main menu',
+  idle: 'Main menu',
+  buy_furniture: 'Buy furniture',
+  setup_office: 'Setup office',
+  bulk_corporate: 'Bulk / corporate',
+  find_product: 'Find a product',
+  store_visit: 'Store visit',
+  talk_to_sales: 'Talk to sales',
+};
+
+function formatTime(d) {
+  if (!d) return '';
+  const date = new Date(d);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  if (sameDay) return date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function dayLabel(d) {
+  const date = new Date(d);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (date.toDateString() === y.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function initials(name, number) {
+  if (name) return name.split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+  return (number || '').slice(-2);
+}
+
+/** WhatsApp *bold* and _italic_ → simple formatting. */
+function WaText({ text }) {
+  const parts = String(text || '').split(/(\*[^*\n]+\*|_[^_\n]+_)/g);
+  return parts.map((p, i) => {
+    if (/^\*[^*]+\*$/.test(p)) return <strong key={i}>{p.slice(1, -1)}</strong>;
+    if (/^_[^_]+_$/.test(p)) return <em key={i}>{p.slice(1, -1)}</em>;
+    return <span key={i}>{p}</span>;
+  });
+}
 
 export default function Conversations() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [page, setPage] = useState(1);
-  const [ownerFilter, setOwnerFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [sendText, setSendText] = useState('');
+  const [list, setList] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState(''); // '' | 'HUMAN' | 'BOT'
+  const [selectedId, setSelectedId] = useState(null);
+  const [thread, setThread] = useState(null);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
+  const [isNarrow, setIsNarrow] = useState(window.innerWidth < 900);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    const params = { page, limit: 20 };
-    if (ownerFilter) params.owner = ownerFilter;
-    if (statusFilter) params.status = statusFilter;
-    api.getConversations(params)
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [page, ownerFilter, statusFilter]);
+  const scrollRef = useRef(null);
+  const lastCountRef = useRef(0);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 900);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
-  async function handleTakeover(convId) {
-    setActionLoading(true);
+  // ── Chat list ────────────────────────────────────────────────────────────
+  const loadList = useCallback(async () => {
     try {
-      await api.takeoverConversation(convId, 'admin');
-      load();
-      setSelected((s) => s ? { ...s, owner: 'HUMAN' } : s);
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(false); }
+      const data = await api.getConversations({ limit: 50, owner: filter, search });
+      setList(data.conversations || []);
+      setTotal(data.total || 0);
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setListLoading(false);
+    }
+  }, [filter, search]);
+
+  useEffect(() => {
+    const t = setTimeout(loadList, search ? 300 : 0); // debounce search typing
+    return () => clearTimeout(t);
+  }, [loadList, search]);
+
+  useEffect(() => {
+    const t = setInterval(loadList, LIST_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [loadList]);
+
+  // ── Message thread ───────────────────────────────────────────────────────
+  const loadThread = useCallback(async (id, { silent } = {}) => {
+    if (!id) return;
+    if (!silent) setThreadLoading(true);
+    try {
+      const data = await api.getConversationMessages(id);
+      setThread(data);
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      if (!silent) setThreadLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    lastCountRef.current = 0;
+    setThread(null);
+    loadThread(selectedId);
+    const t = setInterval(() => loadThread(selectedId, { silent: true }), THREAD_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [selectedId, loadThread]);
+
+  // Scroll to newest message when the chat opens or new messages arrive
+  useEffect(() => {
+    const el = scrollRef.current;
+    const count = thread?.messages?.length || 0;
+    if (!el || !count) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (lastCountRef.current === 0 || (count > lastCountRef.current && nearBottom)) {
+      el.scrollTop = el.scrollHeight;
+    }
+    lastCountRef.current = count;
+  }, [thread]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  const conversation = thread?.conversation;
+  const isHuman = conversation?.owner === 'HUMAN';
+
+  async function takeOver() {
+    setBusy(true);
+    try {
+      await api.takeoverConversation(selectedId, 'admin');
+      await Promise.all([loadThread(selectedId, { silent: true }), loadList()]);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function handleRelease(convId) {
-    setActionLoading(true);
+  async function handBack() {
+    setBusy(true);
     try {
-      await api.releaseConversation(convId);
-      load();
-      setSelected((s) => s ? { ...s, owner: 'BOT' } : s);
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(false); }
+      await api.releaseConversation(selectedId);
+      await Promise.all([loadThread(selectedId, { silent: true }), loadList()]);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function handleSendMessage(to) {
-    if (!sendText.trim()) return;
-    setActionLoading(true);
+  async function send() {
+    const text = draft.trim();
+    if (!text || !conversation) return;
+    setBusy(true);
     try {
-      await api.sendMessage(to, sendText.trim());
-      setSendText('');
-      alert('Message sent!');
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(false); }
+      await api.sendMessage(conversation.whatsappNumber, text);
+      setDraft('');
+      await loadThread(selectedId, { silent: true });
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    } catch (e) {
+      setError(`Message not sent: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const columns = [
-    { key: 'whatsappNumber', label: 'WhatsApp Number' },
-    {
-      key: 'currentFlow', label: 'Current Flow',
-      render: (v) => <code style={{ fontSize: 12 }}>{v || 'idle'}</code>,
-    },
-    {
-      key: 'currentStep', label: 'Step',
-      render: (v) => <code style={{ fontSize: 12 }}>{v || '—'}</code>,
-    },
-    {
-      key: 'owner', label: 'Owner',
-      render: (v) => <StatusBadge status={v || 'BOT'} />,
-    },
-    {
-      key: 'status', label: 'Status',
-      render: (v) => <StatusBadge status={v} />,
-    },
-    {
-      key: 'selectedItems', label: 'Selection',
-      render: (v) => v?.length > 0 ? `${v.length} item(s)` : '—',
-    },
-    {
-      key: 'lastMessageAt', label: 'Last Message',
-      render: (v) => v ? new Date(v).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—',
-    },
-  ];
+  // WhatsApp only allows free-text replies within 24h of the customer's last message
+  const lastInbound = [...(thread?.messages || [])].reverse().find((m) => m.direction === 'inbound');
+  const windowClosed = lastInbound && Date.now() - new Date(lastInbound.createdAt).getTime() > 24 * 3600 * 1000;
+
+  const selectedFromList = list.find((c) => c._id === selectedId);
+  const name = thread?.contact?.name || selectedFromList?.customerName;
+  const showList = !isNarrow || !selectedId;
+  const showThread = !isNarrow || selectedId;
 
   return (
-    <div>
-      <h1 style={{ margin: '0 0 24px', fontSize: 24, color: '#1a1a2e' }}>💬 Conversations</h1>
+    <div style={{ display: 'flex', height: '100%', background: C.bg }}>
+      <style>{`
+        .conv-item { all: unset; box-sizing: border-box; display: flex; gap: 12px; width: 100%; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid ${C.line}; }
+        .conv-item:hover { background: #f7f8fb; }
+        .conv-item[aria-current="true"] { background: #eef7f1; }
+        .conv-item:focus-visible, .chip:focus-visible, .act:focus-visible { outline: 2px solid ${C.green}; outline-offset: -2px; }
+        .chip { border: 1px solid ${C.line}; background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; color: ${C.navy}; }
+        .chip[aria-pressed="true"] { background: ${C.navy}; color: #fff; border-color: ${C.navy}; }
+        .act { border: 1px solid ${C.line}; background: #fff; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; color: ${C.navy}; font-weight: 600; }
+        .act.primary { background: ${C.green}; color: #fff; border-color: ${C.green}; }
+        .act:disabled { opacity: .55; cursor: default; }
+      `}</style>
 
-      <div style={{
-        background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 8,
-        padding: '10px 16px', marginBottom: 20, fontSize: 13, color: '#1b5e20',
-      }}>
-        ✅ When you take over a conversation, the bot stops auto-replying. Release it to return control to the bot.
-      </div>
-
-      {error && <ErrorMsg message={error} />}
-
-      <Card>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-          <select value={ownerFilter} onChange={(e) => { setOwnerFilter(e.target.value); setPage(1); }}
-            style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #ddd', fontSize: 13 }}>
-            <option value="">All Owners</option>
-            <option value="BOT">🤖 Bot</option>
-            <option value="HUMAN">👤 Human</option>
-          </select>
-          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #ddd', fontSize: 13 }}>
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="idle">Idle</option>
-            <option value="timed_out">Timed Out</option>
-            <option value="opted_out">Opted Out</option>
-          </select>
-          <Button size="sm" variant="secondary" onClick={load}>↻ Refresh</Button>
-          <span style={{ marginLeft: 'auto', fontSize: 13, color: '#999', lineHeight: '29px' }}>{data?.total ?? '—'} total</span>
-        </div>
-
-        {loading ? <Loading /> : (
-          <>
-            <Table columns={columns} rows={data?.conversations || []} onRowClick={setSelected} />
-            <Pagination page={page} pages={Math.ceil((data?.total || 0) / 20)} onPage={setPage} />
-          </>
-        )}
-      </Card>
-
-      {selected && (
-        <div style={{
-          position: 'fixed', right: 0, top: 0, bottom: 0, width: 440,
-          background: '#fff', boxShadow: '-4px 0 20px rgba(0,0,0,0.12)',
-          padding: 28, overflowY: 'auto', zIndex: 100,
+      {/* ── Chat list ─────────────────────────────────────────────────── */}
+      {showList && (
+        <section aria-label="Chats" style={{
+          width: isNarrow ? '100%' : 340, flexShrink: 0, background: '#fff',
+          borderRight: `1px solid ${C.line}`, display: 'flex', flexDirection: 'column',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Conversation</h2>
-            <button onClick={() => setSelected(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 20 }}>✕</button>
+          <div style={{ padding: '18px 16px 12px', borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <h1 style={{ margin: 0, fontSize: 20, color: C.navy }}>Chats</h1>
+              <span style={{ fontSize: 12, color: C.muted }}>{total} total</span>
+            </div>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name or number"
+              aria-label="Search chats"
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: 12, padding: '9px 12px',
+                border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 14, background: C.bg,
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button className="chip" aria-pressed={filter === ''} onClick={() => setFilter('')}>All</button>
+              <button className="chip" aria-pressed={filter === 'HUMAN'} onClick={() => setFilter('HUMAN')}>Waiting for sales</button>
+              <button className="chip" aria-pressed={filter === 'BOT'} onClick={() => setFilter('BOT')}>With bot</button>
+            </div>
           </div>
 
-          <Row label="WhatsApp" value={selected.whatsappNumber} />
-          <Row label="Owner" value={<StatusBadge status={selected.owner || 'BOT'} />} />
-          <Row label="Status" value={<StatusBadge status={selected.status} />} />
-          <Row label="Current Flow" value={<code style={{ fontSize: 12 }}>{selected.currentFlow}</code>} />
-          <Row label="Current Step" value={<code style={{ fontSize: 12 }}>{selected.currentStep}</code>} />
-          <Row label="Last Message" value={selected.lastMessageAt ? new Date(selected.lastMessageAt).toLocaleString('en-IN') : '—'} />
-
-          {selected.selectedItems?.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Current Selection</div>
-              {selected.selectedItems.map((item, i) => (
-                <div key={i} style={{ background: '#f8f9fc', borderRadius: 6, padding: '6px 10px', marginBottom: 4, fontSize: 13 }}>
-                  {item.categoryLabel}
-                  {item.quantity && <span style={{ color: '#666', marginLeft: 8 }}>Qty: {item.quantity}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
-            {selected.owner !== 'HUMAN' ? (
-              <Button onClick={() => handleTakeover(selected._id)} disabled={actionLoading} variant="outline">
-                👤 Take Over
-              </Button>
-            ) : (
-              <Button onClick={() => handleRelease(selected._id)} disabled={actionLoading} variant="primary">
-                🤖 Release to Bot
-              </Button>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {listLoading && <div style={{ padding: 20, color: C.muted, fontSize: 14 }}>Loading chats…</div>}
+            {!listLoading && list.length === 0 && (
+              <div style={{ padding: 24, color: C.muted, fontSize: 14, lineHeight: 1.5 }}>
+                {search || filter
+                  ? 'No chats match this search or filter.'
+                  : 'No chats yet. When a customer messages your WhatsApp number, the chat appears here.'}
+              </div>
             )}
+            {list.map((c) => (
+              <button
+                key={c._id}
+                className="conv-item"
+                aria-current={c._id === selectedId}
+                onClick={() => setSelectedId(c._id)}
+              >
+                <Avatar name={c.customerName} number={c.whatsappNumber} human={c.owner === 'HUMAN'} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14, color: C.navy, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.customerName || `+${c.whatsappNumber}`}
+                    </span>
+                    <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>{formatTime(c.lastMessage?.at || c.lastMessageAt)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 3 }}>
+                    <span style={{ fontSize: 13, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.lastMessage
+                        ? `${c.lastMessage.direction === 'outbound' ? 'You: ' : ''}${(c.lastMessage.text || '').replace(/[*_]/g, '').split('\n')[0]}`
+                        : FLOW_LABELS[c.currentFlow] || ''}
+                    </span>
+                    {c.owner === 'HUMAN' && (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: C.red, borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>
+                        Sales
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
+        </section>
+      )}
 
-          {selected.owner === 'HUMAN' && (
-            <div style={{ marginTop: 20 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Send Message</div>
-              <textarea
-                value={sendText}
-                onChange={(e) => setSendText(e.target.value)}
-                placeholder="Type your message as agent..."
-                style={{
-                  width: '100%', minHeight: 80, padding: 10, borderRadius: 7,
-                  border: '1px solid #ddd', fontSize: 13, boxSizing: 'border-box', resize: 'vertical',
-                }}
-              />
-              <Button onClick={() => handleSendMessage(selected.whatsappNumber)} disabled={actionLoading || !sendText.trim()} style={{ marginTop: 8 }}>
-                Send Message
-              </Button>
+      {/* ── Thread ────────────────────────────────────────────────────── */}
+      {showThread && (
+        <section aria-label="Messages" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {!selectedId ? (
+            <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: C.muted, fontSize: 15, padding: 24, textAlign: 'center' }}>
+              Select a chat to read the conversation.
             </div>
+          ) : (
+            <>
+              {/* Header */}
+              <header style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px',
+                background: '#fff', borderBottom: `1px solid ${C.line}`,
+              }}>
+                {isNarrow && (
+                  <button className="act" onClick={() => setSelectedId(null)} aria-label="Back to chats">←</button>
+                )}
+                <Avatar name={name} number={conversation?.whatsappNumber || selectedFromList?.whatsappNumber} human={isHuman} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
+                    {name || `+${conversation?.whatsappNumber || selectedFromList?.whatsappNumber || ''}`}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.muted }}>
+                    +{conversation?.whatsappNumber || selectedFromList?.whatsappNumber}
+                    {conversation && ` · ${isHuman ? 'With sales team' : `Bot: ${FLOW_LABELS[conversation.currentFlow] || conversation.currentFlow}`}`}
+                  </div>
+                </div>
+                {conversation && (isHuman ? (
+                  <button className="act" onClick={handBack} disabled={busy}>Hand back to bot</button>
+                ) : (
+                  <button className="act primary" onClick={takeOver} disabled={busy}>Take over chat</button>
+                ))}
+                {!isNarrow && (
+                  <button className="act" onClick={() => setShowDetails((v) => !v)} aria-pressed={showDetails}>
+                    {showDetails ? 'Hide details' : 'Details'}
+                  </button>
+                )}
+              </header>
+
+              {error && (
+                <div role="alert" style={{ background: '#fdecea', color: C.red, fontSize: 13, padding: '8px 18px' }}>{error}</div>
+              )}
+
+              {/* Messages */}
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', background: C.chatBg, padding: '16px 6%' }}>
+                {threadLoading && <div style={{ textAlign: 'center', color: C.muted, fontSize: 14 }}>Loading messages…</div>}
+                {thread && thread.messages.length === 0 && (
+                  <div style={{ textAlign: 'center', color: C.muted, fontSize: 14 }}>No messages saved for this chat yet.</div>
+                )}
+                {thread?.messages.map((m, i) => {
+                  const prev = thread.messages[i - 1];
+                  const newDay = !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
+                  return (
+                    <div key={m._id}>
+                      {newDay && (
+                        <div style={{ textAlign: 'center', margin: '14px 0' }}>
+                          <span style={{ background: '#fff', color: C.muted, fontSize: 12, padding: '4px 10px', borderRadius: 6 }}>
+                            {dayLabel(m.createdAt)}
+                          </span>
+                        </div>
+                      )}
+                      <Bubble m={m} />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Composer */}
+              <footer style={{ background: '#fff', borderTop: `1px solid ${C.line}`, padding: '12px 18px' }}>
+                {!conversation ? null : !isHuman ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13, color: C.muted }}>
+                    <span style={{ flex: 1 }}>The bot is replying to this customer. Take over the chat to reply yourself.</span>
+                    <button className="act primary" onClick={takeOver} disabled={busy}>Take over chat</button>
+                  </div>
+                ) : (
+                  <>
+                    {windowClosed && (
+                      <div style={{ fontSize: 12, color: '#8a5a00', background: C.alert, borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>
+                        The customer's last message was over 24 hours ago. WhatsApp may block this reply until they message you again — calling them is safer.
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                      <textarea
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                        }}
+                        placeholder="Type a reply… (Enter to send, Shift+Enter for a new line)"
+                        aria-label="Reply message"
+                        rows={2}
+                        style={{
+                          flex: 1, resize: 'none', padding: '10px 12px', borderRadius: 8,
+                          border: `1px solid ${C.line}`, fontSize: 14, fontFamily: 'inherit',
+                        }}
+                      />
+                      <button className="act primary" onClick={send} disabled={busy || !draft.trim()}>
+                        {busy ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </footer>
+            </>
           )}
-        </div>
+        </section>
+      )}
+
+      {/* ── Details ───────────────────────────────────────────────────── */}
+      {selectedId && thread && showDetails && !isNarrow && (
+        <aside aria-label="Customer details" style={{
+          width: 290, flexShrink: 0, background: '#fff', borderLeft: `1px solid ${C.line}`,
+          overflowY: 'auto', padding: 18,
+        }}>
+          <h2 style={{ margin: '0 0 12px', fontSize: 15, color: C.navy }}>Customer</h2>
+          <Detail label="Name" value={thread.contact?.name} />
+          <Detail label="WhatsApp" value={`+${thread.conversation.whatsappNumber}`} />
+          <Detail label="Company" value={thread.contact?.companyName} />
+          <Detail label="First contact" value={thread.contact?.createdAt && new Date(thread.contact.createdAt).toLocaleDateString('en-IN')} />
+          {thread.contact?.consent?.optOutStatus && <Detail label="Marketing" value="Opted out (STOP)" />}
+
+          <h2 style={{ margin: '22px 0 12px', fontSize: 15, color: C.navy }}>
+            Enquiries {thread.leads?.length ? `(${thread.leads.length})` : ''}
+          </h2>
+          {!thread.leads?.length && <div style={{ fontSize: 13, color: C.muted }}>No enquiries recorded yet.</div>}
+          {thread.leads?.map((l) => (
+            <div key={l.leadId} style={{ border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                <ScoreBadge score={l.leadScore} />
+                <span style={{ fontSize: 11, color: C.muted }}>{formatTime(l.createdAt)}</span>
+              </div>
+              <div style={{ fontSize: 13, color: C.navy, fontWeight: 600, marginTop: 8, lineHeight: 1.4 }}>
+                {l.requirement || l.category || l.leadType.replace(/_/g, ' ')}
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 6, lineHeight: 1.6 }}>
+                {l.companyName && <div>Company: {l.companyName}</div>}
+                {l.quantity && <div>Quantity: {l.quantity}</div>}
+                {l.budget && <div>Budget: {l.budget}</div>}
+                {l.location && <div>Location: {l.location}</div>}
+                {l.timeline && <div>Timeline: {l.timeline}</div>}
+                {l.quoteRequested && <div style={{ color: C.green, fontWeight: 600 }}>Quote requested</div>}
+                <div style={{ marginTop: 4, fontSize: 11 }}>{l.leadId}</div>
+              </div>
+            </div>
+          ))}
+        </aside>
       )}
     </div>
   );
 }
 
-function Row({ label, value }) {
-  if (!value && value !== 0) return null;
+function Avatar({ name, number, human }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid #f0f0f5' }}>
-      <span style={{ fontSize: 13, color: '#888' }}>{label}</span>
-      <span style={{ fontSize: 13, color: '#222', fontWeight: 500, maxWidth: '65%', textAlign: 'right' }}>{value}</span>
+    <div aria-hidden="true" style={{
+      width: 40, height: 40, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
+      background: human ? '#fde7e7' : '#e7efe9', color: human ? C.red : C.green, fontWeight: 700, fontSize: 14,
+    }}>
+      {initials(name, number)}
+    </div>
+  );
+}
+
+function Bubble({ m }) {
+  const out = m.direction === 'outbound';
+  const who = !out ? null : m.sentBy === 'agent' ? 'You' : m.sentBy === 'alert' ? 'Sales alert' : 'Bot';
+  const bg = !out ? '#fff' : m.sentBy === 'agent' ? C.agent : m.sentBy === 'alert' ? C.alert : C.greenSoft;
+
+  return (
+    <div style={{ display: 'flex', justifyContent: out ? 'flex-end' : 'flex-start', marginBottom: 6 }}>
+      <div style={{
+        maxWidth: '72%', background: bg, borderRadius: 10, padding: '7px 10px 5px',
+        boxShadow: '0 1px 0.5px rgba(0,0,0,.08)', fontSize: 14, color: '#1f1f2a', lineHeight: 1.45,
+      }}>
+        {who && <div style={{ fontSize: 11, fontWeight: 700, color: m.sentBy === 'agent' ? '#2c4fb5' : C.green, marginBottom: 2 }}>{who}</div>}
+        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><WaText text={m.displayText} /></div>
+        {m.options?.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+            {m.options.map((o, i) => (
+              <span key={i} style={{ fontSize: 12, border: `1px solid ${C.green}`, color: C.green, borderRadius: 999, padding: '1px 8px', background: '#fff' }}>
+                {o}
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: C.muted, textAlign: 'right', marginTop: 2 }}>
+          {m.status === 'failed' && <span style={{ color: C.red, fontWeight: 600 }}>Not delivered · </span>}
+          {new Date(m.createdAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreBadge({ score }) {
+  const styles = {
+    HOT: { bg: '#fde7e7', fg: C.red },
+    WARM: { bg: '#fff1d6', fg: '#a35b00' },
+    COLD: { bg: '#e8eaf2', fg: C.muted },
+  }[score || 'COLD'];
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '2px 8px', background: styles.bg, color: styles.fg }}>
+      {score || 'COLD'}
+    </span>
+  );
+}
+
+function Detail({ label, value }) {
+  if (!value) return null;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', borderBottom: `1px solid ${C.line}`, fontSize: 13 }}>
+      <span style={{ color: C.muted }}>{label}</span>
+      <span style={{ color: C.navy, fontWeight: 500, textAlign: 'right' }}>{value}</span>
     </div>
   );
 }

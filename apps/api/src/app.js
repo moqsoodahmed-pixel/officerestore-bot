@@ -21,7 +21,8 @@ app.use(helmet());
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? [process.env.DASHBOARD_ORIGIN || 'http://localhost:5173']
+    ? (process.env.DASHBOARD_ORIGIN || 'http://localhost:5173')
+        .split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean)
     : '*',
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],

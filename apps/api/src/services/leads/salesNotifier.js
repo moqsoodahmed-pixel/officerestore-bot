@@ -53,7 +53,7 @@ async function notifySales(lead, reason) {
 
   for (const number of numbers) {
     try {
-      await sendText(number, text);
+        await sendText(number, text, { sentBy: 'alert' });
       logger.info('Sales alert sent', { leadId: lead.leadId, to: number });
     } catch (err) {
       logger.error('Sales alert failed', { leadId: lead.leadId, to: number, error: err.message });

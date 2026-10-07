@@ -47,7 +47,8 @@ async function processEvent(parsedEvent) {
     contactId: contact._id,
     direction: 'inbound',
     messageType: parsedEvent.type,
-    inboundText: text,
+    inboundText: text || interactiveTitle,
+    displayText: text || interactiveTitle || (parsedEvent.type ? `[${parsedEvent.type}]` : ''),
     inboundPayload: parsedEvent.raw,
     processed: false,
     flowSnapshot: {

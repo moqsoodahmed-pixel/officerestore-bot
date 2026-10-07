@@ -3,6 +3,7 @@
 const { sendWhatsApp } = require('./msg91Client');
 const config = require('../../config');
 const logger = require('../../utils/logger');
+const Message = require('../../models/Message');
 
 /**
  * WhatsApp message builders for MSG91.
@@ -18,14 +19,17 @@ const FROM = config.msg91.whatsappNumber;
 
 // ─── Text Message ────────────────────────────────────────────────────────────
 
-async function sendText(to, text) {
+/**
+ * @param {object} opts - { sentBy: 'bot' | 'agent' | 'alert' }
+ */
+async function sendText(to, text, opts = {}) {
   const payload = {
     from: FROM,
     to: normalizeNumber(to),
     type: 'text',
     text: { body: text },
   };
-  return _send(payload, 'text');
+  return _send(payload, 'text', opts);
 }
 
 // ─── Interactive List Message ─────────────────────────────────────────────────
@@ -169,14 +173,55 @@ async function sendMainMenu(to, greeting = '') {
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
-async function _send(payload, type) {
+async function _send(payload, type, opts = {}) {
   try {
     const result = await sendWhatsApp(payload);
     logger.info('WhatsApp message sent', { to: payload.to, type, messageId: result?.messageId });
+    await recordOutbound(payload, type, opts, 'sent', result?.messageId);
     return result;
   } catch (err) {
     logger.error('WhatsApp send failed', { to: payload.to, type, error: err.message });
+    await recordOutbound(payload, type, opts, 'failed', null, err.message);
     throw err;
+  }
+}
+
+/** Readable text + option labels for the dashboard chat view. */
+function describe(payload) {
+  if (payload.type === 'text') return { text: payload.text?.body || '', options: [] };
+  if (payload.type === 'interactive') {
+    const i = payload.interactive || {};
+    const parts = [i.header?.text, i.body?.text, i.footer?.text].filter(Boolean);
+    let options = [];
+    if (i.type === 'button') options = (i.action?.buttons || []).map((b) => b.reply?.title).filter(Boolean);
+    if (i.type === 'list') {
+      options = (i.action?.sections || []).flatMap((sec) => (sec.rows || []).map((r) => r.title));
+    }
+    return { text: parts.join('\n\n'), options };
+  }
+  if (payload.type === 'template') return { text: `[Template: ${payload.template?.name}]`, options: [] };
+  return { text: `[${payload.type}]`, options: [] };
+}
+
+/** Save every outbound message so the dashboard shows the full chat. */
+async function recordOutbound(payload, type, opts, status, providerId, failureReason) {
+  try {
+    const { text, options } = describe(payload);
+    await Message.create({
+      providerMessageId: `out-${providerId || 'x'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      whatsappNumber: payload.to,
+      direction: 'outbound',
+      messageType: type,
+      displayText: text,
+      options,
+      sentBy: opts.sentBy || 'bot',
+      outboundPayload: payload,
+      status,
+      failureReason,
+      processed: true,
+    });
+  } catch (err) {
+    logger.warn('Could not record outbound message', { error: err.message });
   }
 }
 

@@ -11,11 +11,15 @@ const messageSchema = new mongoose.Schema({
   contactId: { type: mongoose.Schema.Types.ObjectId, ref: 'Contact' },
 
   direction: { type: String, enum: ['inbound', 'outbound'], required: true },
-  messageType: {
-    type: String,
-    enum: ['text', 'interactive', 'template', 'image', 'document', 'button', 'list'],
-    default: 'text',
-  },
+  // Any WhatsApp type: text, interactive, button, list, image, location, ...
+  messageType: { type: String, default: 'text' },
+
+  // Readable text for the dashboard chat view
+  displayText: { type: String },
+  // Buttons / list rows offered in an outbound message
+  options: { type: [String], default: [] },
+  // Who sent an outbound message: bot | agent | alert
+  sentBy: { type: String },
 
   // Inbound: raw text or interactive selection
   inboundText: { type: String },

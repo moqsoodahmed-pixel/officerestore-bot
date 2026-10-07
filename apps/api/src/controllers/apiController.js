@@ -7,6 +7,7 @@ const catalogueService = require('../services/catalogue/catalogueService');
 const orderService = require('../services/orders/orderService');
 const Conversation = require('../models/Conversation');
 const Contact = require('../models/Contact');
+const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const stateManager = require('../conversation/stateManager');
 const { sendText } = require('../services/msg91/whatsappService');
@@ -113,17 +114,78 @@ async function lookupOrder(req, res) {
 // ─── Conversations (admin) ────────────────────────────────────────────────────
 
 async function getConversations(req, res) {
-  const { owner, status, page = 1, limit = 20 } = req.query;
+  const { owner, status, search, page = 1, limit = 20 } = req.query;
   const query = {};
   if (owner) query.owner = owner;
   if (status) query.status = status;
+
+  // Search by number or customer name
+  if (search && search.trim()) {
+    const term = search.trim();
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const contacts = await Contact.find({ name: { $regex: escaped, $options: 'i' } }, { whatsappNumber: 1 }).lean();
+    query.$or = [
+      { whatsappNumber: { $regex: term.replace(/\D/g, '') || escaped } },
+      { whatsappNumber: { $in: contacts.map((c) => c.whatsappNumber) } },
+    ];
+  }
 
   const [conversations, total] = await Promise.all([
     Conversation.find(query).sort({ lastMessageAt: -1 }).skip((+page - 1) * +limit).limit(+limit).lean(),
     Conversation.countDocuments(query),
   ]);
 
-  res.json({ success: true, conversations, total, page: +page });
+  // Attach customer name + last message preview
+  const numbers = conversations.map((c) => c.whatsappNumber);
+  const [contacts, lastMessages] = await Promise.all([
+    Contact.find({ whatsappNumber: { $in: numbers } }, { whatsappNumber: 1, name: 1, companyName: 1 }).lean(),
+    Message.aggregate([
+      { $match: { whatsappNumber: { $in: numbers } } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$whatsappNumber', text: { $first: '$displayText' }, direction: { $first: '$direction' }, at: { $first: '$createdAt' } } },
+    ]),
+  ]);
+  const contactMap = Object.fromEntries(contacts.map((c) => [c.whatsappNumber, c]));
+  const lastMap = Object.fromEntries(lastMessages.map((m) => [m._id, m]));
+
+  const enriched = conversations.map((c) => ({
+    ...c,
+    customerName: contactMap[c.whatsappNumber]?.name || null,
+    companyName: contactMap[c.whatsappNumber]?.companyName || null,
+    lastMessage: lastMap[c.whatsappNumber] || null,
+  }));
+
+  res.json({ success: true, conversations: enriched, total, page: +page });
+}
+
+/**
+ * Full message history for one conversation (oldest first).
+ */
+async function getConversationMessages(req, res) {
+  const conversation = await Conversation.findById(req.params.id).lean();
+  if (!conversation) return res.status(404).json({ success: false, message: 'Conversation not found' });
+
+  const limit = Math.min(+req.query.limit || 300, 1000);
+  const messages = await Message.find(
+    { whatsappNumber: conversation.whatsappNumber },
+    { direction: 1, messageType: 1, displayText: 1, inboundText: 1, options: 1, sentBy: 1, status: 1, failureReason: 1, createdAt: 1 }
+  ).sort({ createdAt: -1 }).limit(limit).lean();
+
+  const contact = await Contact.findOne({ whatsappNumber: conversation.whatsappNumber }).lean();
+  const leads = await require('../models/Lead')
+    .find({ whatsappNumber: conversation.whatsappNumber })
+    .sort({ createdAt: -1 }).limit(10).lean();
+
+  res.json({
+    success: true,
+    conversation,
+    contact,
+    leads,
+    messages: messages.reverse().map((m) => ({
+      ...m,
+      displayText: m.displayText || m.inboundText || (m.messageType ? `[${m.messageType}]` : ''),
+    })),
+  });
 }
 
 /**
@@ -168,7 +230,7 @@ async function sendMessage(req, res) {
   const { to, text } = req.body;
   if (!to || !text) return res.status(400).json({ success: false, message: 'to and text are required' });
 
-  await sendText(to, text);
+  await sendText(to, text, { sentBy: 'agent' });
   res.json({ success: true, message: 'Message sent' });
 }
 
@@ -211,7 +273,7 @@ module.exports = {
   createTicket, getTickets, getTicket, updateTicket,
   getCategories, searchProducts,
   lookupOrder,
-  getConversations, releaseConversation, takeoverConversation,
+  getConversations, getConversationMessages, releaseConversation, takeoverConversation,
   sendMessage,
   getDashboardStats,
 };

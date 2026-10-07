@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { clearAdminKey } from '../services/api';
 
 const NAV = [
   { to: '/', label: '📊 Dashboard', end: true },
@@ -9,8 +10,16 @@ const NAV = [
 ];
 
 export default function Layout() {
+  const { pathname } = useLocation();
+  const fullBleed = pathname.startsWith('/conversations');
+
+  function signOut() {
+    clearAdminKey();
+    window.dispatchEvent(new Event('officerestore:logout'));
+  }
+
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif' }}>
       {/* Sidebar */}
       <nav style={{
         width: 220, background: '#1a1a2e', color: '#fff', padding: '24px 0',
@@ -34,10 +43,16 @@ export default function Layout() {
             </NavLink>
           ))}
         </div>
+        <button onClick={signOut} style={{
+          margin: 'auto 20px 0', padding: '8px 0', background: 'transparent',
+          border: '1px solid #2d2d4e', borderRadius: 6, color: '#8888aa', fontSize: 13, cursor: 'pointer',
+        }}>
+          Sign out
+        </button>
       </nav>
 
       {/* Main content */}
-      <main style={{ flex: 1, background: '#f5f6fa', padding: 32, overflowY: 'auto' }}>
+      <main style={{ flex: 1, background: '#f5f6fa', padding: fullBleed ? 0 : 32, overflowY: fullBleed ? 'hidden' : 'auto', height: '100vh', boxSizing: 'border-box' }}>
         <Outlet />
       </main>
     </div>

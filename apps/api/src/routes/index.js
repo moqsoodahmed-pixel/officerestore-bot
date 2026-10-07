@@ -63,6 +63,7 @@ router.get('/api/orders/:orderId', apiLimiter, ctrl.lookupOrder);
 
 // Conversations
 router.get('/api/conversations', apiLimiter, ctrl.getConversations);
+router.get('/api/conversations/:id/messages', apiLimiter, ctrl.getConversationMessages);
 router.post('/api/conversations/:id/takeover', apiLimiter, ctrl.takeoverConversation);
 router.post('/api/conversations/:id/release', apiLimiter, ctrl.releaseConversation);
 
