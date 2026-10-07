@@ -72,7 +72,7 @@ async function handle(event, conversation, contact) {
     setData(conversation, { quantity: qty });
 
     await sendButtons(from, {
-      body: `Quantity: *${qty}*\n\nDo you have a budget per item? Type the amount (e.g. *3000*), or tap Skip.`,
+      body: `Quantity: *${qty}*\n\nWhat's your budget per piece? (e.g. ₹3,000)\n\nNot sure yet? Tap *Skip* and we'll show you all available options.`,
       buttons: [SKIP_BTN, SALES_BTN],
     });
     await stateManager.transition(conversation, FLOW, 'awaiting_budget');
@@ -86,7 +86,7 @@ async function handle(event, conversation, contact) {
       budgetPerUnit = parseNumber(event.text);
       if (!budgetPerUnit) {
         await sendButtons(from, {
-          body: 'Please type the budget as a number (e.g. *3000*), or tap Skip.',
+          body: 'Please type your budget as a number, like *3000*.\n\nOr tap *Skip* to see all options.',
           buttons: [SKIP_BTN, SALES_BTN],
         });
         return;
